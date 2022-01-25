@@ -1,3 +1,138 @@
+#' Display total rain observation over China.
+#'
+#' @param totalRain, data.frame, {lon, lat, totalRain}
+#' @param nx, interpolated grid nx
+#' @param ny, interpolated grid ny
+#' @param myat, contour levels
+#' @param xlim, map longitude limit
+#' @param ylim, map latitude limit
+#' @param colors, color pallete
+#' @param main, plot titile
+#' @param interpKrige, interpolate totalRain by krige method (slowly)
+#' @param dgrid, grid interval
+#' @param imageFile, output image file
+#'
+#' @return NULL
+#' @export
+#'
+#' @examples
+#'   display_total_rain_china(totalRain)
+#'
+draw_rain_china <- function(totalRain, nx=128, ny=76,
+                            myat=seq(0, 2400, by=300),
+                            xlim=c(72,136), ylim=c(16,54),
+                            colors=NULL, main=NULL,
+                            interpKrige=FALSE, dgrid=0.5,
+                            imageFile=NULL){
+  # change column names
+  colnames(totalRain) <- c("x", "y", "z")
+  
+  # interpolation to grid
+  if (interpKrige) {
+    pred <-expand.grid(seq(xlim[1],xlim[2],by=dgrid),seq(ylim[1],ylim[2],by=dgrid))    # create predicted grid
+    pred <-cbind(pred[,1], pred[,2])
+    pred <-sp::SpatialPoints(pred)
+    totalRainFLD <- sp::SpatialPointsDataFrame(totalRain[,1:2],totalRain[,3])          # interpolate to grid
+    totalRainFLD <- automap::autoKrige(z~1, totalRainFLD, new_data=pred)
+    totalRainFLD <- as.data.frame(totalRainFLD$krige_output)
+    totalRainFLD <- raster::rasterFromXYZ(totalRainFLD[,1:3],                          # convert to raster
+                                          crs='+proj=longlat +ellps=WGS84')
+  } else {
+    totalRainFLD <- akima::interp(x=totalRain[[1]], y=totalRain[[2]],
+                                  z=totalRain[[3]], linear=TRUE, nx=nx,ny=ny)
+    totalRainFLD <- raster::raster(totalRainFLD, crs='+proj=longlat +ellps=WGS84')
+  }
+  
+  # mask out china region
+  chinashp <- rgdal::readOGR(system.file("extdata",package="nmcMetResources"), "bou1_4p")
+  totalRainFLD <- raster::mask(totalRainFLD, chinashp, inverse = FALSE)
+  
+  # set color key
+  myColorkey <- list(at=myat, labels=list(at=myat,cex=1.5))
+  if (is.null(colors)) colors <- rev(RColorBrewer::brewer.pal(length(myat), 'RdBu'))
+  
+  # draw raster
+  provincesBound <- nmcMetResources::provinceDF
+  riversBound <- nmcMetResources::river1DF
+  p1 <- rasterVis::levelplot(totalRainFLD, layers=1, margin=FALSE, contour=FALSE,
+                             at=myat, colorkey=myColorkey, xlim=xlim, ylim=ylim,
+                             scales=list(x=list(cex=1.5),y=list(cex=1.5)),
+                             xlab=list("Longitude", cex=1.5), ylab=list("Latitude", cex=1.5),
+                             main=list(label=main, cex=1.5), lwd=2,
+                             par.settings=rasterVis::rasterTheme(region=colors,axis.line=list(lwd = 2))) +
+    latticeExtra::layer(panel.lines(lon,lat,col="black"),data=provincesBound) +
+    latticeExtra::layer(panel.lines(lon,lat,col="blue"),data=riversBound)
+  p2 <- lattice::xyplot(lat ~ lon, provincesBound, type='l', col='black',
+                        scales=list(x=list(at=NULL),y=list(at=NULL)), lwd=1.5,
+                        aspect="iso",xlab="",ylab="",xlim=c(106,124),ylim=c(3,23))
+  
+  # show the graphics
+  if (is.null(imageFile)) {
+    dev.new(width=14, height=10, noRStudioGD=TRUE)
+    print(p1, position=c(0,0,1,1), more=TRUE)
+    print(p2, position=c(0.1,0.07,0.32,0.4))
+  } else {
+    cairo_pdf(filename=imageFile,pointsize=12,width=9,height=6.4,family="simhei")
+    print(p1, position=c(0,0,1,1), more=TRUE)
+    print(p2, position=c(0.1,0.07,0.37,0.45))
+    dev.off()
+  }
+  return(NULL)
+}
+
+
+#' Title
+#'
+#' @param staIds 
+#' @param startTimeStr 
+#' @param nhours 
+#' 
+#' @import ggplot2
+#' @importFrom magrittr %>%
+#'
+#' @return
+#' @export
+#'
+#' @examples
+#'    g <- surf_1h_obs_pre_series("54399,54511", startTimeStr="2020020500", nhours=36)
+#'    
+surf_1h_obs_pre_series <- function(staIds, startTimeStr, nhours=36){
+  
+  # get the time range
+  timeRange <- get_music_time_range_str(startTimeStr, num=nhours, units="hour")
+  
+  # retrieve the observation data
+  dataCode <- "SURF_CHN_MUL_HOR"
+  elements <- "Station_Name,Station_Id_C,Lat,Lon,Alti,Datetime,PRE_1h"
+  obsData <- nmcMetIO::cimiss_obs_by_time_range_and_staIds(timeRange, dataCode=dataCode, elements=elements, staIds=staIds)
+  
+  # prepare the data
+  obsData <- obsData %>% dplyr::mutate(Name=paste0(Station_Name,"(",Station_Id_C,")"))
+  
+  # prepare plot figure
+  sysfonts::font_add("simhei", "simhei.ttf")
+  showtext::showtext_auto()
+  
+  # plot the rainfall series
+  g <- ggplot(data=obsData, aes(x=Datetime))+
+    geom_col(aes(y=PRE_1h, fill=Name), show.legend = FALSE) + 
+    geom_text(aes(y=PRE_1h, label=ifelse(obsData$PRE_1h > quantile(obsData$PRE_1h, 0.9),
+                                         as.character(obsData$PRE_1h),'')), vjust=-0.5) +
+    scale_x_datetime(date_labels="%dT%H", date_breaks="3 hours", date_minor_breaks="1 hours", expand=c(0,0)) +
+    scale_y_continuous(limits=c(0, max(0.5, obsData$PRE_1h)), expand=expand_scale(mult = c(0, .1))) + 
+    facet_grid(rows = vars(Name)) + 
+    labs(y="降水量 ", x="", title="地面气象站逐小时降水观测 ",
+         subtitle=paste0(strftime(min(obsData$Datetime), "%Y-%m-%dT%H:%M", tz="GMT"), ' 至 ',
+                         strftime(max(obsData$Datetime), "%Y-%m-%dT%H:%M", tz="GMT"), ' 时(UTC)逐1小时累积降水量观测 '),
+         caption="Data source from the CIMISS of National Meteorological Information Center. \n Producted by National Meteorological Center of CMA.") +
+    hrbrthemes::theme_ipsum(base_family='simhei', base_size=16, axis_title_size=16,
+                            plot_title_size=22, subtitle_size=14, strip_text_size=16,
+                            caption_family='Arial Narrow', caption_margin=0) +
+    theme(panel.spacing = unit(0.8, "lines"))
+  return(g)
+}
+
+
 #' Plot day maximum temperature observations over China.
 #'
 #' @param date, date string, like "20160801"

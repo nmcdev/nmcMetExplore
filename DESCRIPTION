@@ -1,5 +1,5 @@
 Package: nmcMetExplore
-Title: Meteorological data analysis and visualization in NMC.
+Title: The collection of meteorological data analysis and visualization functions.
 Version: 0.1.0
 Authors@R: 
     person(given = "Kan",
@@ -11,16 +11,24 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Imports: 
-    ggplot2,
     dplyr,
-    nmcMetIO,
-    nmcMetResources,
-    sp,
+    lubridate,
+    tibble,
+    data.table,
+    sf,
     automap,
+    akima,
     raster,
     rasterVis,
-    akima
+    ggplot2,
+    hrbrthemes,
+    showtext,
+    sysfonts,
+    metR,
+    nmcMetIO,
+    nmcMetResources,
 Remotes:
-    nmcdev/nmcMetIO
+    nmcdev/nmcMetIO,
+    nmcdev/nmcMetResources,
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 6.1.1
+RoxygenNote: 7.1.1
